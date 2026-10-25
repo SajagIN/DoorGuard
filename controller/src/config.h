@@ -24,3 +24,4 @@
 #define KNOCK_WINDOW_MS      3000   // two knocks inside this window = knock_2
 #define TILT_LIMIT_CDEG      500    // 5 degrees, in centi-degrees, from the armed baseline
 #define HEARTBEAT_TIMEOUT_MS 300    // a node silent for longer is a fault
+#define INIT_TIMEOUT_MS      1000   //@C4 self-test timeout before FAULT

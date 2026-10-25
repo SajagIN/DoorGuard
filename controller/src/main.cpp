@@ -65,10 +65,17 @@ static bool fresh(uint8_t node, uint32_t now) {
   return lastSeen[node] != 0 && (now - lastSeen[node]) <= HEARTBEAT_TIMEOUT_MS;
 }
 
+//@C4-BEGIN
+// CSV log line: ms,kind,state,detail
+void logEvent(const char *kind, const char *detail) {
+  Serial.printf("%lu,%s,%s,%s\n", (unsigned long)millis(), kind, STATE_NAME[st], detail);
+}
+//@C4-END
 
 static void setState(State s, uint32_t now) {
   st = s;
   stateSince = now;
+  logEvent("STATE", STATE_NAME[s]); //@C4
 }
 
 // ---------- Packet handling ----------
@@ -151,6 +158,18 @@ void checkButton(uint32_t now) {
 
 // ---------- FSM tick (task T1, every TICK_MS) ----------
 void fsmTick(uint32_t now) {
+  //@C4-BEGIN
+  int missing = 0;
+  for (uint8_t n = NODE_DOOR; n <= NODE_PRESENCE; n++) {
+    if (!fresh(n, now)) missing++;
+  }
+  if (st == S_DISARMED || st == S_ARMED || st == S_ALARM) {
+    if (missing > 0) {                  // a node is silent: mask it and go to FAULT
+      setState(S_FAULT, now);
+      return;
+    }
+  }
+  //@C4-END
 
   bool hallEv = doorOpen;
   bool knockEv = knockCount >= 2 && (now - firstKnockMs) <= KNOCK_WINDOW_MS;
@@ -161,6 +180,11 @@ void fsmTick(uint32_t now) {
       if (fresh(NODE_DOOR, now) && fresh(NODE_MOTION, now) && fresh(NODE_PRESENCE, now)) {
         setState(S_DISARMED, now);
       }
+      //@C4-BEGIN
+      else if (now - stateSince > INIT_TIMEOUT_MS) {
+        setState(S_FAULT, now);
+      }
+      //@C4-END
       break;
     case S_DISARMED:
       break;                            // waits for the ARM hold
@@ -171,6 +195,17 @@ void fsmTick(uint32_t now) {
       break;
     case S_ALARM:
       break;                            // waits for the DISARM hold
+    //@C4-BEGIN
+    case S_FAULT:
+      if (missing >= 2) {
+        setState(S_SAFE, now);          // second loss: SAFE, leave only by power cycle
+      } else if (missing == 0) {
+        setState(S_DISARMED, now);      // sensor back: restore
+      }
+      break;
+    case S_SAFE:
+      break;
+    //@C4-END
   }
 }
 
@@ -217,6 +252,7 @@ void setup() {
   }
   esp_now_register_recv_cb(onRecv);
 
+  //@C4
   Serial.println("ms,kind,state,detail");
   Serial.printf("controller MAC %s\n", WiFi.macAddress().c_str());
   setState(S_INIT, millis());
